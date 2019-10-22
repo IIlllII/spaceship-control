@@ -4,16 +4,14 @@ from autograd import elementwise_grad
 from autograd import hessian
 from autograd import jacobian
 from autograd import make_hvp
+import sys
 
 
 # Returns an array with three values. It is assumed that you are turning from t=0
 # The array contains:
 # [time to start accelerating and turning, time to stop turning and only accelerate, total time until stop]
 #
-# Current limitations are:
-# - This does not handle cases with counter clockwise turns
-# - Does not currently not handle cases with non 180 degree turns
-# These limitations are trivial to fix though.
+#
 def full_stop(acceleration, turn_rate, d0, v0):
 
     # create needed derivative functions
@@ -26,8 +24,24 @@ def full_stop(acceleration, turn_rate, d0, v0):
     hs_x = hessian(constraint_x, 0)
     hs_y = hessian(constraint_y, 0)
 
-    # Calculate initial guess
-    ta = np.pi / turn_rate
+    # Calculate initial guess parameters
+    v0_direction = -v0 / np.linalg.norm(v0)
+    facing_dir = np.array([np.cos(d0), np.sin(d0)])
+
+    # Angle between direction we are pointing and traveling
+    angle = np.arccos(np.clip(np.dot(v0_direction, facing_dir), -1.0, 1.0))
+
+    # The dir unit circle position of v0
+    v0_radians = np.arccos(v0_direction[0])
+    if v0_direction[1] < 0:
+        v0_radians = np.pi + np.arccos(-v0_direction[0])
+
+    # Get direction to turn
+    turn_dir = -1
+    if turn_positive(d0, v0_radians):
+        turn_dir = 1
+
+    ta = angle / turn_rate
     tm = np.linalg.norm(v0) / acceleration
 
     # Generate an initial guess
@@ -45,7 +59,7 @@ def full_stop(acceleration, turn_rate, d0, v0):
     # Create the bundle of functions
     fns = Optizelle.EqualityConstrained.Functions.t()
     fns.f = MyObj(first_deriv, hessian_vp)
-    fns.g = MyEq(jacobian_x, jacobian_y, hs_x, hs_y, acceleration, turn_rate, d0, v0)
+    fns.g = MyEq(jacobian_x, jacobian_y, hs_x, hs_y, acceleration, turn_dir*turn_rate, d0, v0)
 
     # Solve the optimization problem
     Optizelle.EqualityConstrained.Algorithms.getMin(
@@ -59,8 +73,15 @@ def full_stop(acceleration, turn_rate, d0, v0):
     return state.x
 
 
+# a is the direction we are facing
+# b is the direction we need to face, is shortest way clockwise (negative) or counterclockwise (positive)
+def turn_positive(a, b):
+    return 0 <= b - a <= np.pi
+
+
 # Constraint that must be satisfied in x direction
 def constraint_x(t, acc, s, d0, v0x):
+
     ts_sum = (acc * np.sin(d0 + s * t[1])) / s
     ta_sum = (acc * np.sin(d0 + s * t[0])) / s
 
@@ -74,6 +95,7 @@ def constraint_x(t, acc, s, d0, v0x):
 
 # Constraint that must be satisfied in y direction
 def constraint_y(t, acc, s, d0, v0y):
+
     ts_sum = -(acc * np.cos(d0 + s * t[1])) / s
     ta_sum = -(acc * np.cos(d0 + s * t[0])) / s
 
@@ -86,7 +108,12 @@ def constraint_y(t, acc, s, d0, v0y):
 
 
 # The objective function. Only tm (time to stop) is important, so that is what is minimized.
+# The stupid t[0] stuff is to ensure that if t[0] goes below zero it is forced back,
+# this should be done with an inequality constraint, but the Optizelle docs are a bit unclear on how to do those,
+# this hack forced it back for now though.
 def objective(t):
+    if t[0] < 0:
+        return t[0]*t[0]*100 + t[2] * t[2]
     return t[2] * t[2]
 
 
@@ -161,7 +188,34 @@ class MyEq(Optizelle.VectorValuedFunction):
         xhat[2] = tst_x[2] + tst_y[2]
 
 
-solution = full_stop(2.0, np.pi / 2.0, 0.0, np.array([2.0, 0.0]))
-
+# Run a test for the base case
+solution = full_stop(2.0, np.pi / 2.0, 0, np.array([2.0, 0.0]))
 # Print out the final answer
-print("The optimal point is:" + str(solution))
+print("The optimal point for base input is:" + str(solution))
+
+# Do more runs if arg is given
+if len(sys.argv) > 1 and sys.argv[1] == "runall":
+    # Run a test for a case where we need to turn clockwise
+    solution = full_stop(2.0, np.pi / 2.0, np.pi + np.pi/2, np.array([2.0, 0.0]))
+    # Print out the final answer
+    print("The optimal point for cw turn is:" + str(solution))
+
+    # Run a test where we are close to the right angle
+    solution = full_stop(2.0, np.pi / 2.0, np.pi/2+1, np.array([2.0, 0.0]))
+    # Print out the final answer
+    print("The optimal point when we are nearly point the right direction is:" + str(solution))
+
+    # Run a test where we only need to accelerate
+    solution = full_stop(2.0, np.pi / 2.0, np.pi, np.array([2.0, 0.0]))
+    # Print out the final answer
+    print("The optimal point when we are pointing in the right direction is:" + str(solution))
+
+    # Movement in opposite direct
+    solution = full_stop(2.0, np.pi / 2.0, np.pi, np.array([-2.0, 0.0]))
+    # Print out the final answer
+    print("The optimal point for the inverse base input is:" + str(solution))
+
+    # Movement in y
+    solution = full_stop(2.0, np.pi / 2.0, 0, np.array([2.0, 2.0]))
+    # Print out the final answer
+    print("The optimal point when we have y movement is:" + str(solution))
