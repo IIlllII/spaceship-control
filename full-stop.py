@@ -6,7 +6,6 @@ from autograd import jacobian
 from autograd import make_hvp
 import sys
 
-
 # Returns an array with three values. It is assumed that you are turning from t=0
 # The array contains:
 # [time to start accelerating and turning, time to stop turning and only accelerate, total time until stop]
@@ -54,7 +53,7 @@ def full_stop(acceleration, turn_rate, d0, v0):
     state = Optizelle.EqualityConstrained.State.t(Optizelle.Rm, Optizelle.Rm, x, y)
 
     # Read the optimization parameters from file
-    Optizelle.json.EqualityConstrained.read(Optizelle.Rm, Optizelle.Rm, "newton_cg.json", state)
+    Optizelle.json.EqualityConstrained.read(Optizelle.Rm, Optizelle.Rm, "trust_region.json", state)
 
     # Create the bundle of functions
     fns = Optizelle.EqualityConstrained.Functions.t()
